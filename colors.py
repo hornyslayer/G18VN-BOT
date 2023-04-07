@@ -1,0 +1,3 @@
+done = 0x2ecc71
+fail = 0xe74c3c
+waiting = 0x3498db
