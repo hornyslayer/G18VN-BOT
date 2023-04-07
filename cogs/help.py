@@ -11,6 +11,10 @@ class Help(commands.Cog):
         em = nextcord.Embed(title = "Tổng hợp lệnh",
                             description=("`!help` Hiển thị toàn bộ lệnh\n"
                                          "`!weather` Xem thời tiết\n"
+                                         "`!lv` kiểm tra cấp độ\n"
+                                         "`!shop` xem cửa hàng\n"
+                                         "`!iv` xem túi đồ\n"
+                                         "`!buy` mua item\n"
                                          "`!work` Làm việc kiếm tiền\n"
                                          "`!crime` Đi làm ăn trộm\n"
                                          "`!slut` Đi làm 4\n"
