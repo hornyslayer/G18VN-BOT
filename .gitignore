@@ -1,6 +1,5 @@
 /config.py
 /bank.db
-/__pycache__/*
 *.pyc
-cogs/__pycache__/*
+/cogs/__pycache__/*
 

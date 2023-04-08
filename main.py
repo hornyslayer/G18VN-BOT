@@ -2,7 +2,6 @@ from emojis import coin
 from colors import done, fail, waiting
 from nextcord.ext.commands import CommandOnCooldown
 from ast import List
-from nextcord import Interaction, SlashOption
 from nextcord.ext import commands
 
 import nextcord
