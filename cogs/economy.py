@@ -173,25 +173,10 @@ class Economy(commands.Cog):
         if not inventory:
             return "Your inventory is empty"
 
-        # Create a temporary list to hold the combined items
-        combined_items = []
-        for item in inventory:
-            item_name = item["name"]
-            item_desc = item["des"]
-            item_count = 1
-            for combined_item in combined_items:
-                if combined_item["name"] == item_name and combined_item["desc"] == item_desc:
-                    combined_item["count"] += 1
-                    item_count = 0
-                    break
-            if item_count > 0:
-                combined_items.append(
-                    {"name": item_name, "desc": item_desc, "count": 1})
-
-        # Generate the output string
         item_list = "\n".join(
-            [f"{i+1}. {item['name']} ({item['desc']}) x{item['count']}" for i, item in enumerate(combined_items)])
+            [f"{i+1}. {item['name']} ({item['des']}) x{item['amount']}" for i, item in enumerate(inventory)])
         return f"Your inventory:\n{item_list}"
+
 
     @commands.command(name='inv')
     async def inventory(self, ctx: commands.Context, member: nextcord.Member = None):
@@ -204,7 +189,7 @@ class Economy(commands.Cog):
     async def buy(self, ctx, item_name, amount):
         if amount is None:
             amount = 1
-        if amount > 0:
+        if int(amount) > 0:
             amount = amount
 
         shop_data = await self.get_shop_data()
@@ -216,21 +201,39 @@ class Economy(commands.Cog):
         if not item:
             await ctx.send(f"Item '{item_name}' not found in the shop")
             return
+
         wallet, bank, maxbank = await self.get_balance(ctx.author)
         cost = item["cost"]
-        totalcost = cost * amount
+        totalcost = int(cost) * int(amount)
         if int(wallet) < int(totalcost):
             await ctx.send("You don't have enough money to buy this item")
             return
-        await self.update_wallet(ctx.author, -int(totalcost))
+        user_data = await self.get_userdata(ctx.author)
+        inventory = user_data.get("inventory", [])
+        item_index = -1
+        for i, inv_item in enumerate(inventory):
+            if inv_item["name"] == item_name:
+                item_index = i
+                break
+        if item_index == -1:
+            new_item = {
+                "id_item": item["id_item"],
+                "name": item["name"],
+                "des": item["des"],
+                "cost": item["cost"],
+                "amount": amount
+            }
+            inventory.append(new_item)
+        else:
+            inventory[item_index]["amount"] = int(inventory[item_index]["amount"]) + int(amount)
         self.collection.update_one(
             {"user_id": ctx.author.id},
-            {"$push": {"inventory": item}}
+            {"$set": {"inventory": inventory}}
         )
-
-        # Display the purchase and new wallet balance to the user
+        await self.update_wallet(ctx.author, -int(totalcost))
+        
         wallet, bank, maxbank = await self.get_balance(ctx.author)
-        await ctx.send(f"You bought '{item['name']}' for {item['cost']} coins! Your new wallet balance is {wallet} coins.")
+        await ctx.send(f"Mua thành công '{item['name']}' với {item['cost']} coins! Your new wallet balance is {wallet} coins.")
 
     @commands.command(name='balance')
     async def balance(self, ctx: commands.Context, member: nextcord.Member = None):
