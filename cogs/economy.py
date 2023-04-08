@@ -201,31 +201,28 @@ class Economy(commands.Cog):
         await ctx.send(f"{member.mention}'s inventory:\n{inventory}")
 
     @commands.command()
-    async def buy(self, ctx, item_name):
+    async def buy(self, ctx, item_name, amount):
+        if amount is None:
+            amount = 1
+        if amount > 0:
+            amount = amount
+
         shop_data = await self.get_shop_data()
-        # Find the item with the specified name in the shop
         item = None
         for i in shop_data["items"]:
             if i["name"] == item_name:
                 item = i
                 break
-
-        # If the item is not found in the shop, send an error message
         if not item:
             await ctx.send(f"Item '{item_name}' not found in the shop")
             return
-
-        # Check if the user has enough money to buy the item
         wallet, bank, maxbank = await self.get_balance(ctx.author)
         cost = item["cost"]
-        if int(wallet) < int(cost):
+        totalcost = cost * amount
+        if int(wallet) < int(totalcost):
             await ctx.send("You don't have enough money to buy this item")
             return
-
-        # Deduct the cost of the item from the user's wallet
-        await self.update_wallet(ctx.author, -int(cost))
-
-        # Add the item to the user's inventory
+        await self.update_wallet(ctx.author, -int(totalcost))
         self.collection.update_one(
             {"user_id": ctx.author.id},
             {"$push": {"inventory": item}}
