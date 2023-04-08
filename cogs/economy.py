@@ -1,9 +1,8 @@
 from ast import List
 from nextcord.ext import commands
 import nextcord
-import os
+from nextcord import Embed
 import locale
-import math
 from pymongo import MongoClient
 from colors import done, fail, waiting
 import asyncio
@@ -17,24 +16,27 @@ sys.path.insert(0, '')
 
 MONGODB_URL = 'mongodb+srv://admin:18810410139Aa.@cluster0.iltqw84.mongodb.net/?retryWrites=true&w=majority'
 
+
 class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.last_coins = {}
         self.get_database()
-    def get_database(self): 
+
+    def get_database(self):
         cluster = MongoClient(MONGODB_URL, tlsInsecure=True)
         db = cluster["economy"]
         self.collection = db["users"]
-        print(db)
-        return self.collection
+        self.shops_collection = db["shops"]
+        return self.collection, self.shops_collection
+
     @commands.Cog.listener()
     async def on_ready(self):
+        shop = await self.create_shop()
         commands.db = await aiosqlite.connect("bank.db")
         await asyncio.sleep(3)
         async with commands.db.cursor() as cursor:
             await cursor.execute("CREATE TABLE IF NOT EXISTS inv (name TEXT, id TEXT, desc TEXT, amount INTEGER, user INTEGER)")
-            await cursor.execute("CREATE TABLE IF NOT EXISTS shop (name TEXT, id TEXT, desc TEXT, cost INTEGER)")
             await cursor.execute("CREATE TABLE IF NOT EXISTS level (level INTEGER, exp FLOAT, maxexp FLOAT, user INTEGER)")
         await commands.db.commit()
 
@@ -50,35 +52,28 @@ class Economy(commands.Cog):
            # await self.update_wallet(user, reward)
             # cập nhật thời gian cuối cùng người dùng nhận tiền
             self.last_coins[user.id] = now
-            #print(f"{user} nhận được {reward} vàng")
+            # print(f"{user} nhận được {reward} vàng")
 
     def format_money(self, amount):
         # cập nhật locale theo ngôn ngữ máy tính
         locale.setlocale(locale.LC_ALL, '')
         return locale.format_string("%d", amount, grouping=True)
 
-    async def create_inv(self, user):
-        async with commands.db.cursor() as cursor:
-            await cursor.execute("INSERT INTO inv VALUES (?, ?, ?, ?, ?)", (None, None, None, None, user.id)) #Thêm item có id = 1 vào inventory với số lượng bằng 0.
-        await commands.db.commit()
-        return
-    
-
-    async def get_inv(self, user):
-        async with commands.db.cursor() as cursor:
-            await cursor.execute("SELECT shop.name, inv.amount FROM shop INNER JOIN inv ON shop.id = inv.id WHERE inv.user = ? AND inv.amount > 0", (user.id,))
-            data = await cursor.fetchall()
-            if data is None:
-                await self.create_inv(user)
-                return 0, 0, 0
-            inventory = {row[0]: row[1] for row in data}
-            return inventory
-
-    async def update_shop(self, name: str, id: str, desc: str, cost: int):
-        async with commands.db.cursor()as cursor:
-            await cursor.execute("INSERT INTO shop VALUES(?, ?, ?, ?)", (name, id, desc, cost))
-        await commands.db.commit()
-        return
+    async def create_shop(self):
+        collection = self.shops_collection
+        query = {"name": "shopserver"}
+        # If the shop does not exist, adds the shop to the db
+        if collection.count_documents(query) == 0:
+            new_shop = {
+                "name": 'shopserver',
+                "items": []
+            }
+            collection.insert_one(new_shop)
+            request = new_shop
+        else:  # If the shop exists, returns the shop json file
+            request = collection.find_one(query)
+        self.shop_data = request
+        return self.shop_data
 
     async def update_maxbank(self, user, amount: int):
         collection = self.collection
@@ -93,19 +88,28 @@ class Economy(commands.Cog):
     async def create_balance(self, user):
         collection = self.collection
         query = {"user_id": user.id}
-        if collection.count_documents(query) == 0: # If a user is not in the database, adds the user to the db
-            new_bank_account = {"wallet": 0,
-                                "bank": 100,
-                                "maxbank": 100000,
-                                "user_id": user.id
-                                }
+        # If a user is not in the database, adds the user to the db
+        if collection.count_documents(query) == 0:
+            new_bank_account = {
+                "user_id": user.id,
+                "cash": {
+                    "wallet": 0,
+                    "bank": 1000,
+                    "maxbank": 100000,
+                },
+                "level": {
+                    "current": 1,
+                    "exp": 0,
+                    "nextexp": 10
+                },
+                "inventory": []
+            }
             collection.insert_one(new_bank_account)
             request = new_bank_account
-        else: # If a user is in the database, returns the user json file
+        else:  # If a user is in the database, returns the user json file
             request = collection.find_one(query)
         self.user_data = request
         return self.user_data
-
 
     async def get_balance(self, user):
         collection = self.collection
@@ -113,21 +117,36 @@ class Economy(commands.Cog):
         user_data = collection.find_one(query)
         if user_data is None:
             user_data = await self.create_balance(user)
-        wallet, bank, maxbank = user_data.get("wallet", 0), user_data.get("bank", 100), user_data.get("maxbank", 100000)
+        wallet, bank, maxbank = user_data.get("cash", {}).get("wallet", 0), user_data.get(
+            "cash", {}).get("bank", 0), user_data.get("cash", {}).get("maxbank", 0)
         return wallet, bank, maxbank
 
-    async def update_wallet(self, user, amount: int):
+    async def get_userdata(self, user):
         collection = self.collection
         query = {"user_id": user.id}
         user_data = collection.find_one(query)
         if user_data is None:
-            await self.create_balance(user)
-            return 0
-        wallet = user_data.get("wallet", 0)
-        new_wallet = wallet + amount
-        collection.update_one(query, {"$set": {"wallet": new_wallet}})
-        return new_wallet
+            user_data = await self.create_balance(user)
+        return user_data
 
+    async def update_wallet(self, user, amount):
+        collection = self.collection
+        query = {"user_id": user.id}
+        print(query)
+        user_data = collection.find_one(query)
+        if user_data is None:
+            user_data = await self.create_balance(user)
+            return
+        wallet = user_data.get("cash", {}).get("wallet", 0)
+        print(wallet)
+        print(amount)
+        new_wallet = wallet + amount
+        collection.update_one(query, {"$set": {"cash.wallet": new_wallet}})
+        print((collection.update_one(
+            query, {"$set": {"cash.wallet": new_wallet}})).matched_count)
+        print((collection.update_one(
+            query, {"$set": {"cash.wallet": new_wallet}})).modified_count)
+        return new_wallet
 
     async def update_bank(self, user, amount: int):
         collection = self.collection
@@ -135,13 +154,86 @@ class Economy(commands.Cog):
         if user_data is None:
             await self.create_balance(user)
             return 0
-        wallet, bank, maxbank = user_data.get("wallet", 0), user_data.get("bank", 100), user_data.get("maxbank", 100000)
+        wallet, bank, maxbank = user_data.get("cash", {}).get("wallet", 0), user_data.get(
+            "cash", {}).get("bank", 100), user_data.get("cash", {}).get("maxbank", 100000)
         capacity = int(maxbank - bank)
         if amount > capacity:
             await self.update_wallet(user, amount)
             return 1
-        collection.update_one({"user_id": user.id}, {"$inc": {"bank": amount}})
+        collection.update_one({"user_id": user.id}, {
+                              "$inc": {"cash.bank": amount}})
 
+    async def get_inventory(self, user):
+        collection = self.collection
+        query = {"user_id": user.id}
+        user_data = collection.find_one(query)
+        if user_data is None:
+            await self.create_balance(user)
+        inventory = user_data.get("inventory", [])
+        if not inventory:
+            return "Your inventory is empty"
+
+        item_list = "\n".join(
+            [f"{i+1}. {item['name']} ({item['des']}) x{item['amount']}" for i, item in enumerate(inventory)])
+        return f"Your inventory:\n{item_list}"
+
+
+    @commands.command(name='inv')
+    async def inventory(self, ctx: commands.Context, member: nextcord.Member = None):
+        if not member:
+            member = ctx.author
+        inventory = await self.get_inventory(member)
+        await ctx.send(f"{member.mention}'s inventory:\n{inventory}")
+
+    @commands.command()
+    async def buy(self, ctx, item_name, amount):
+        if amount is None:
+            amount = 1
+        if int(amount) > 0:
+            amount = amount
+
+        shop_data = await self.get_shop_data()
+        item = None
+        for i in shop_data["items"]:
+            if i["name"] == item_name:
+                item = i
+                break
+        if not item:
+            await ctx.send(f"Item '{item_name}' not found in the shop")
+            return
+
+        wallet, bank, maxbank = await self.get_balance(ctx.author)
+        cost = item["cost"]
+        totalcost = int(cost) * int(amount)
+        if int(wallet) < int(totalcost):
+            await ctx.send("You don't have enough money to buy this item")
+            return
+        user_data = await self.get_userdata(ctx.author)
+        inventory = user_data.get("inventory", [])
+        item_index = -1
+        for i, inv_item in enumerate(inventory):
+            if inv_item["name"] == item_name:
+                item_index = i
+                break
+        if item_index == -1:
+            new_item = {
+                "id_item": item["id_item"],
+                "name": item["name"],
+                "des": item["des"],
+                "cost": item["cost"],
+                "amount": amount
+            }
+            inventory.append(new_item)
+        else:
+            inventory[item_index]["amount"] = int(inventory[item_index]["amount"]) + int(amount)
+        self.collection.update_one(
+            {"user_id": ctx.author.id},
+            {"$set": {"inventory": inventory}}
+        )
+        await self.update_wallet(ctx.author, -int(totalcost))
+        
+        wallet, bank, maxbank = await self.get_balance(ctx.author)
+        await ctx.send(f"Mua thành công '{item['name']}' với {item['cost']} coins! Your new wallet balance is {wallet} coins.")
 
     @commands.command(name='balance')
     async def balance(self, ctx: commands.Context, member: nextcord.Member = None):
@@ -499,13 +591,32 @@ class Economy(commands.Cog):
 
     @commands.command()
     @commands.is_owner()
-    async def add_items(self, ctx, name: str, id: str, desc: str, cost: int):
-        await self.update_shop(name, id, desc, cost)
-        await ctx.send("Item added!", delete_after=5)
+    async def create_item(self, ctx, name, description, cost):
+        check = await self.check_amount(ctx, cost)
+        if check == True:
+            return
+        collection = self.shops_collection
+        query = {"name": "shopserver"}
+        shop_data = collection.find_one(query)
+        for item in shop_data["items"]:
+            if item["name"] == name:
+                await ctx.send("Đã tồn tại", delete_after=5)
+                return
+        item_id = len(shop_data["items"]) + 1
+        new_item = {
+            "id_item": item_id,
+            "name": name,
+            "des": description,
+            "cost": cost
+        }
+        shop_data["items"].append(new_item)
+        collection.update_one(query, {"$set": {"items": shop_data["items"]}})
+        await ctx.send("added")
+        return new_item
 
     @commands.command()
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def shop(self, ctx):
+    async def shop1(self, ctx):
         embed = nextcord.Embed(title="G18VN SHOP")
         async with commands.db.cursor() as cursor:
             await cursor.execute("SELECT name, desc, cost FROM shop")
@@ -515,18 +626,77 @@ class Economy(commands.Cog):
                     name=item[0], value=f"{item[1]} | Cost: {item[2]}", inline=False)
         await ctx.send(embed=embed, view=ShopView(commands))
 
+    async def get_shop_data(self):
+        collection = self.shops_collection
+        query = {"name": "shopserver"}
+        shop_data = collection.find_one(query)
+        if shop_data is None:
+            new_shop = {
+                "name": 'shopserver',
+                "items": []
+            }
+            collection.insert_one(new_shop)
+            shop_data = new_shop
+        return shop_data
+
     @commands.command()
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    async def inventory(self, ctx):
-        inventory = await self.get_inv(ctx.author)
-        if not inventory:
-            await ctx.send("Bạn không có bất kỳ mặt hàng nào trong túi đồ của mình!")
-            return
-        embed = nextcord.Embed(title="Túi đồ của bạn")
-        for item, amount in inventory.items():
-            embed.add_field(
-                name=item, value=f"Số lượng: {amount}", inline=False)
-        await ctx.send(embed=embed)
+    async def shop(self, ctx):
+        collection = self.shops_collection
+        query = {"name": "shopserver"}
+        shop_data = collection.find_one(query)
+        if shop_data is None:
+            new_shop = {
+                "name": 'shopserver',
+                "items": []
+            }
+            collection.insert_one(new_shop)
+            shop_data = new_shop
+        items = shop_data.get("items", [])
+        index = 0
+        if len(items) == 0:
+            await ctx.send("There are no items in the shop.")
+        else:
+            message = "Items in the shop:\n\n"
+            for item in items:
+                index += 1
+                message += f"**{item['name']} - {item['cost']}**{coin}\n{item['des']}\n"
+                message += f"\n"
+            embed = Embed(title="**G18VN STORE**", description=message)
+            await ctx.send(embed=embed)
+
+    @commands.command()
+    async def delete_item(self, ctx, name):
+        collection = self.shops_collection
+        query = {"name": "shopserver"}
+        shop_data = collection.find_one(query)
+        items = shop_data.get("items", [])
+
+        # Find the item with the given name
+        item_to_delete = None
+        for item in items:
+            if item["name"] == name:
+                item_to_delete = item
+                break
+
+        if item_to_delete is None:
+            await ctx.send(f"No item with name {name} found in the shop.")
+        else:
+            items.remove(item_to_delete)
+            collection.update_one(query, {"$set": {"items": items}})
+            await ctx.send(f"Item {name} has been deleted from the shop.")
+
+    async def check_amount(self, ctx, amount):
+        try:
+            amount = int(amount)
+        except ValueError:
+            pass
+        if amount < 0:
+            await ctx.send("Giá tiền phải lớn hơn hoặc bằng 0")
+            return True
+        if amount is None:
+            await ctx.send("Vui lòng cung cấp giá cho mục!")
+            return True
+        return fail
 
 
 class ShopView(nextcord.ui.View):
