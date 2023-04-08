@@ -51,7 +51,7 @@ class Fish(commands.Cog):
             em.set_author(name=ctx.author, icon_url=ctx.author.avatar.url)
             await economy.update_wallet(ctx.author, fish_prices_sum)
             await levels.update_level(ctx.author, exp_points)
-            await ctx.send(embed=em, delete_after=300)
+            await ctx.send(embed=em, delete_after=30)
             
 def calculate_weights(level):
     weights_0 = max(50 - level * 2, 0)
@@ -61,7 +61,7 @@ def calculate_weights(level):
     weights = [weights_0, weights_1, 15, weights_3, weights_4]
     total_weight = sum(weights)
     normalized_weights = [w / total_weight for w in weights]
-    print(normalized_weights)
+    #print(normalized_weights)
     return normalized_weights
 def setup(bot):
     bot.add_cog(Fish(bot))
