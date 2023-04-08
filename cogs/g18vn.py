@@ -145,7 +145,7 @@ class G18VN(commands.Cog):
         elif Error_Name == 7:
             await interaction.response.send_message("https://discord.com/channels/692575045603557417/726079992240275487/1085753043120816220")
         else:
-            file = nextcord.File("./vhhdpt.png", filename="vhhdpt.png")
+            file = nextcord.File("./vhhqdpt.png", filename="vhhqdpt.png")
             await interaction.response.send_message("Tải `ZArchiver` về , chọn thư mục chứa file game, click vào `Vô hiệu hóa quét đa phương tiện`.\n", file=file)
 
 
